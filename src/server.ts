@@ -254,6 +254,20 @@ app.use((err: any, _req: express.Request, res: express.Response, _next: express.
   }
 });
 
+app.get("/debug/routes", (_req, res) => {
+  const router = (app as any).router;
+  const stack: any[] = router?.stack ?? [];
+  const routes = stack
+    .map((layer) => {
+      const route = layer?.route;
+      if (!route) return null;
+      const methods = Object.keys(route.methods ?? {}).filter((m) => route.methods[m]);
+      return { path: route.path, methods };
+    })
+    .filter(Boolean);
+  res.json({ routes });
+});
+
 const port = process.env.PORT || 8080;
 app.listen(port, () => {
   console.log(`Backend listening on port ${port}`);
