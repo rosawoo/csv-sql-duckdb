@@ -1,0 +1,8 @@
+node_modules/
+build/
+uploads/
+data.duckdb
+data.duckdb.wal
+data.duckdb.tmp
+.DS_Store
+*.log

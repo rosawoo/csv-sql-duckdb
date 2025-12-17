@@ -1,0 +1,12 @@
+{
+  "compilerOptions": {
+    "rootDir": "./src",   // where TS files live
+    "outDir": "./build",  // where JS output goes after compilation
+    "module": "commonjs",
+    "target": "es2020",
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "strict": true,
+    "skipLibCheck": true
+  }
+}

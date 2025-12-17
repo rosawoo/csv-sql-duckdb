@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CSV to SQL (DuckDB)</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="page">
+      <header class="header">
+        <div>
+          <h1>CSV to SQL</h1>
+          <p class="subtitle">Upload a CSV as <code>tablename</code>, then query it with SQL.</p>
+        </div>
+        <div class="status" id="status"></div>
+      </header>
+
+      <main class="grid">
+        <section class="card">
+          <h2>1) Upload CSV</h2>
+          <form id="uploadForm" class="upload">
+            <input id="csvFile" type="file" name="file" accept=".csv,text/csv" required />
+            <button type="submit" id="uploadBtn">Upload</button>
+          </form>
+          <div class="hint">
+            The file is imported into DuckDB as a table named <code>tablename</code>.
+          </div>
+          <div class="meta" id="uploadMeta"></div>
+        </section>
+
+        <section class="card">
+          <h2>2) SQL Query</h2>
+          <textarea
+            id="query"
+            spellcheck="false"
+            rows="10"
+          >SELECT
+  name,
+  salary,
+  hire_date
+FROM tablename
+WHERE department = 'Engineering'
+  AND hire_date &lt; '2020-01-01'
+ORDER BY salary DESC;</textarea>
+          <div class="actions">
+            <button id="runBtn">Run query</button>
+            <label class="checkbox">
+              <input type="checkbox" id="noLimit" />
+              No limit (may be slow)
+            </label>
+          </div>
+          <div class="hint">
+            NOTE: By default the backend limits results to keep things responsive.
+          </div>
+        </section>
+
+        <section class="card card--full">
+          <h2>3) Results</h2>
+          <div class="results">
+            <div id="error" class="error" hidden></div>
+            <div id="tableWrap" class="tableWrap"></div>
+          </div>
+        </section>
+      </main>
+
+      <footer class="footer">
+        <!-- <span>Backend: Express + DuckDB</span> -->
+        <span class="dot">•</span>
+        <a href="/health" target="_blank" rel="noreferrer">/health</a>
+      </footer>
+    </div>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
