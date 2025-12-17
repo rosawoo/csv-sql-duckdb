@@ -1,14 +1,41 @@
 import express from "express";
 import multer from "multer";
 import * as DuckDB from "duckdb";
+import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import cors from "cors";
 import * as path from "path";
 import * as fs from "fs";
+import { pipeline } from "stream/promises";
 
 const app = express();
 
 const uploadsDir = path.resolve("uploads");
 fs.mkdirSync(uploadsDir, { recursive: true });
+
+function getS3Config() {
+  const bucket = process.env.S3_BUCKET;
+  const region = process.env.S3_REGION;
+  if (!bucket || !region) return null;
+
+  const endpoint = process.env.S3_ENDPOINT;
+  const forcePathStyle = process.env.S3_FORCE_PATH_STYLE === "true";
+
+  return { bucket, region, endpoint, forcePathStyle };
+}
+
+function getS3Client(): { client: S3Client; bucket: string } | null {
+  const cfg = getS3Config();
+  if (!cfg) return null;
+
+  const client = new S3Client({
+    region: cfg.region,
+    endpoint: cfg.endpoint || undefined,
+    forcePathStyle: cfg.forcePathStyle,
+  });
+
+  return { client, bucket: cfg.bucket };
+}
 
 const upload = multer({
   storage: multer.diskStorage({
@@ -111,6 +138,71 @@ app.post("/upload", upload.single("file"), async (req, res) => {
   } catch (err: any) {
     console.error(err);
     res.status(500).send(err.message ?? "Internal error");
+  }
+});
+
+app.post("/upload/presign", async (req, res) => {
+  const { filename, contentType } = req.body as { filename?: string; contentType?: string };
+  const s3 = getS3Client();
+  if (!s3) {
+    return res.status(501).type("text/plain").send("S3 not configured");
+  }
+
+  const safeExt = filename ? path.extname(filename) : ".csv";
+  const key = `uploads/${Date.now()}-${Math.random().toString(16).slice(2)}${safeExt || ".csv"}`;
+
+  try {
+    const cmd = new PutObjectCommand({
+      Bucket: s3.bucket,
+      Key: key,
+      ContentType: contentType || "text/csv",
+    });
+    const uploadUrl = await getSignedUrl(s3.client, cmd, { expiresIn: 3600 });
+    res.json({ uploadUrl, key });
+  } catch (err: any) {
+    console.error(err);
+    res.status(500).type("text/plain").send(err.message ?? "Failed to presign upload");
+  }
+});
+
+app.post("/upload/import", async (req, res) => {
+  const { key } = req.body as { key?: string };
+  const s3 = getS3Client();
+  if (!s3) {
+    return res.status(501).type("text/plain").send("S3 not configured");
+  }
+  if (!key) {
+    return res.status(400).type("text/plain").send("Missing key");
+  }
+
+  const localPath = path.join(
+    uploadsDir,
+    `s3-${Date.now()}-${Math.random().toString(16).slice(2)}.csv`
+  );
+
+  try {
+    const obj = await s3.client.send(new GetObjectCommand({ Bucket: s3.bucket, Key: key }));
+    if (!obj.Body) {
+      return res.status(500).type("text/plain").send("Missing object body");
+    }
+
+    await pipeline(obj.Body as any, fs.createWriteStream(localPath));
+
+    await queryDuckDB("DROP TABLE IF EXISTS tablename;");
+    await queryDuckDB(`
+      CREATE TABLE tablename AS
+      SELECT * FROM read_csv_auto('${localPath}', HEADER=TRUE);
+    `);
+
+    const count = await queryDuckDB("SELECT COUNT(*) AS cnt FROM tablename;");
+    const rowCount = jsonSafeValue(count.rows[0][0]);
+
+    fs.unlink(localPath, () => {});
+    res.json({ rowCount });
+  } catch (err: any) {
+    console.error(err);
+    fs.unlink(localPath, () => {});
+    res.status(500).type("text/plain").send(err.message ?? "Import failed");
   }
 });
 

@@ -159,27 +159,72 @@ uploadForm.addEventListener('submit', async (e) => {
   }
 
   const file = csvFile.files[0];
-  const form = new FormData();
-  form.append('file', file);
 
   setLoading(true);
-  setStatus('Uploading and importing CSV...');
+  setStatus('Preparing upload...');
   uploadMeta.textContent = '';
   tableWrap.innerHTML = '';
   setResultsMeta(null);
 
   try {
-    const res = await fetch('/upload', {
+    // Prefer direct-to-object-storage uploads (S3/R2) if configured.
+    let presignRes = await fetch('/upload/presign', {
       method: 'POST',
-      body: form,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filename: file.name, contentType: file.type || 'text/csv' }),
     });
 
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(text || 'Upload failed');
+    if (presignRes.status === 501) {
+      // Fallback: upload through app server.
+      const form = new FormData();
+      form.append('file', file);
+      setStatus('Uploading and importing CSV...');
+      const res = await fetch('/upload', { method: 'POST', body: form });
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || 'Upload failed');
+      }
+      const data = await res.json();
+      uploadMeta.textContent = `Imported ${data.rowCount ?? '?'} rows.`;
+      setStatus('Upload complete. Ready for queries.');
+      return;
     }
 
-    const data = await res.json();
+    if (!presignRes.ok) {
+      const text = await presignRes.text();
+      throw new Error(text || 'Failed to prepare upload');
+    }
+
+    const presign = await presignRes.json();
+    if (!presign.uploadUrl || !presign.key) {
+      throw new Error('Invalid presign response');
+    }
+
+    setStatus('Uploading to object storage...');
+    const putRes = await fetch(presign.uploadUrl, {
+      method: 'PUT',
+      headers: { 'Content-Type': file.type || 'text/csv' },
+      body: file,
+    });
+
+    if (!putRes.ok) {
+      const text = await putRes.text();
+      throw new Error(text || `Storage upload failed (${putRes.status})`);
+    }
+
+    setStatus('Importing from object storage...');
+    const importRes = await fetch('/upload/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: presign.key }),
+    });
+
+    if (!importRes.ok) {
+      const text = await importRes.text();
+      throw new Error(text || 'Import failed');
+    }
+
+    const data = await importRes.json();
     uploadMeta.textContent = `Imported ${data.rowCount ?? '?'} rows.`;
     setStatus('Upload complete. Ready for queries.');
   } catch (err) {
