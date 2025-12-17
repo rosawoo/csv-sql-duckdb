@@ -147,6 +147,36 @@ async function health() {
   }
 }
 
+async function pollImportJob(jobId) {
+  const start = Date.now();
+  const maxMs = 60 * 60 * 1000;
+
+  while (true) {
+    if (Date.now() - start > maxMs) {
+      throw new Error('Import is taking too long. Try again or check server logs.');
+    }
+
+    const res = await fetch(`/upload/import/status?jobId=${encodeURIComponent(jobId)}`);
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(text || 'Failed to check import status');
+    }
+
+    const data = await res.json();
+    const status = data.status;
+    if (data.message) {
+      setStatus(data.message);
+    }
+
+    if (status === 'done') return data;
+    if (status === 'error') {
+      throw new Error(data.error || 'Import failed');
+    }
+
+    await new Promise((r) => setTimeout(r, 2000));
+  }
+}
+
 uploadForm.addEventListener('submit', async (e) => {
   e.preventDefault();
   showError(null);
@@ -224,8 +254,14 @@ uploadForm.addEventListener('submit', async (e) => {
       throw new Error(text || 'Import failed');
     }
 
-    const data = await importRes.json();
-    uploadMeta.textContent = `Imported ${data.rowCount ?? '?'} rows.`;
+    const importData = await importRes.json();
+    const jobId = importData.jobId;
+    if (!jobId) {
+      throw new Error('Import did not return a jobId');
+    }
+
+    const final = await pollImportJob(jobId);
+    uploadMeta.textContent = `Imported ${final.rowCount ?? '?'} rows.`;
     setStatus('Upload complete. Ready for queries.');
   } catch (err) {
     showError(String(err?.message ?? err));

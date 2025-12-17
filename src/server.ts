@@ -7,6 +7,7 @@ import cors from "cors";
 import * as path from "path";
 import * as fs from "fs";
 import { pipeline } from "stream/promises";
+ import crypto from "crypto";
 
 const app = express();
 
@@ -58,6 +59,26 @@ const publicDir = path.resolve("public");
 app.use(express.static(publicDir));
 
 const db = new DuckDB.Database("data.duckdb");
+
+type ImportJobStatus = "queued" | "downloading" | "importing" | "done" | "error";
+type ImportJob = {
+  id: string;
+  status: ImportJobStatus;
+  key: string;
+  startedAt: number;
+  updatedAt: number;
+  message?: string;
+  rowCount?: any;
+  error?: string;
+};
+
+const importJobs = new Map<string, ImportJob>();
+
+function newJobId(): string {
+  return typeof (crypto as any).randomUUID === "function"
+    ? (crypto as any).randomUUID()
+    : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
 
 function jsonSafeValue(value: any): any {
   if (typeof value === "bigint") return value.toString();
@@ -165,6 +186,28 @@ app.post("/upload/presign", async (req, res) => {
   }
 });
 
+app.get("/upload/import/status", (req, res) => {
+  const jobId = String((req.query as any)?.jobId ?? "").trim();
+  if (!jobId) {
+    return res.status(400).type("text/plain").send("Missing jobId");
+  }
+
+  const job = importJobs.get(jobId);
+  if (!job) {
+    return res.status(404).type("text/plain").send("Unknown jobId");
+  }
+
+  res.json({
+    id: job.id,
+    status: job.status,
+    message: job.message,
+    rowCount: job.rowCount,
+    error: job.error,
+    startedAt: job.startedAt,
+    updatedAt: job.updatedAt,
+  });
+});
+
 app.post("/upload/import", async (req, res) => {
   const { key } = req.body as { key?: string };
   const s3 = getS3Client();
@@ -175,35 +218,57 @@ app.post("/upload/import", async (req, res) => {
     return res.status(400).type("text/plain").send("Missing key");
   }
 
-  const localPath = path.join(
-    uploadsDir,
-    `s3-${Date.now()}-${Math.random().toString(16).slice(2)}.csv`
-  );
+  const id = newJobId();
+  const now = Date.now();
+  const job: ImportJob = {
+    id,
+    status: "queued",
+    key,
+    startedAt: now,
+    updatedAt: now,
+    message: "Queued",
+  };
+  importJobs.set(id, job);
 
-  try {
-    const obj = await s3.client.send(new GetObjectCommand({ Bucket: s3.bucket, Key: key }));
-    if (!obj.Body) {
-      return res.status(500).type("text/plain").send("Missing object body");
+  res.status(202).json({ jobId: id });
+
+  (async () => {
+    const touch = (patch: Partial<ImportJob>) => {
+      const cur = importJobs.get(id);
+      if (!cur) return;
+      Object.assign(cur, patch, { updatedAt: Date.now() });
+    };
+
+    const localPath = path.join(uploadsDir, `s3-${id}.csv`);
+
+    try {
+      touch({ status: "downloading", message: "Downloading from object storage" });
+      const obj = await s3.client.send(new GetObjectCommand({ Bucket: s3.bucket, Key: key }));
+      if (!obj.Body) {
+        touch({ status: "error", error: "Missing object body" });
+        return;
+      }
+
+      await pipeline(obj.Body as any, fs.createWriteStream(localPath));
+
+      touch({ status: "importing", message: "Importing into DuckDB" });
+      await queryDuckDB("DROP TABLE IF EXISTS tablename;");
+      await queryDuckDB(`
+        CREATE TABLE tablename AS
+        SELECT * FROM read_csv_auto('${localPath}', HEADER=TRUE);
+      `);
+
+      const count = await queryDuckDB("SELECT COUNT(*) AS cnt FROM tablename;");
+      const rowCount = jsonSafeValue(count.rows[0][0]);
+
+      fs.unlink(localPath, () => {});
+      touch({ status: "done", message: "Import complete", rowCount });
+    } catch (err: any) {
+      console.error(err);
+      fs.unlink(localPath, () => {});
+      touch({ status: "error", error: err?.message ?? String(err), message: "Import failed" });
     }
-
-    await pipeline(obj.Body as any, fs.createWriteStream(localPath));
-
-    await queryDuckDB("DROP TABLE IF EXISTS tablename;");
-    await queryDuckDB(`
-      CREATE TABLE tablename AS
-      SELECT * FROM read_csv_auto('${localPath}', HEADER=TRUE);
-    `);
-
-    const count = await queryDuckDB("SELECT COUNT(*) AS cnt FROM tablename;");
-    const rowCount = jsonSafeValue(count.rows[0][0]);
-
-    fs.unlink(localPath, () => {});
-    res.json({ rowCount });
-  } catch (err: any) {
-    console.error(err);
-    fs.unlink(localPath, () => {});
-    res.status(500).type("text/plain").send(err.message ?? "Import failed");
-  }
+  })();
 });
 
 app.post("/query", async (req, res) => {
