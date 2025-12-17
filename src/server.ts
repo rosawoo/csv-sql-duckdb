@@ -115,16 +115,37 @@ app.post("/upload", upload.single("file"), async (req, res) => {
 });
 
 app.post("/query", async (req, res) => {
-  const { query, noLimit } = req.body as { query?: string; noLimit?: boolean };
+  const { query, page, pageSize } = req.body as {
+    query?: string;
+    page?: number;
+    pageSize?: number;
+  };
   if (!query) {
     return res.status(400).send("Missing query");
   }
 
   try {
     const trimmed = query.trim().replace(/;\s*$/, "");
-    const sql = noLimit ? trimmed : `SELECT * FROM (${trimmed}) AS q LIMIT 1000`;
+
+    const safePageSizeRaw = typeof pageSize === "number" ? pageSize : 100;
+    const safePageSize = Math.max(1, Math.min(5000, Math.floor(safePageSizeRaw)));
+    const safePageRaw = typeof page === "number" ? page : 1;
+    const safePage = Math.max(1, Math.floor(safePageRaw));
+    const offset = (safePage - 1) * safePageSize;
+
+    const sql = `SELECT * FROM (${trimmed}) AS q LIMIT ${safePageSize + 1} OFFSET ${offset}`;
     const result = await queryDuckDB(sql);
-    res.json(result);
+
+    const hasNext = result.rows.length > safePageSize;
+    const rows = hasNext ? result.rows.slice(0, safePageSize) : result.rows;
+
+    res.json({
+      columns: result.columns,
+      rows,
+      page: safePage,
+      pageSize: safePageSize,
+      hasNext,
+    });
   } catch (err: any) {
     console.error(err);
     res.status(400).send(`Query error: ${err.message}`);

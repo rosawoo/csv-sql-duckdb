@@ -11,7 +11,7 @@
       <header class="header">
         <div>
           <h1>Query CSV with SQL</h1>
-          <p class="subtitle">Upload a CSV as <code>tablename</code>, then query it with SQL.</p>
+          <p class="subtitle">Upload a CSV as <code>tablename</code>, then query it with SQL</p>
         </div>
         <div class="status" id="status"></div>
       </header>
@@ -46,12 +46,22 @@ ORDER BY salary DESC;</textarea>
           <div class="actions">
             <button id="runBtn">Run query</button>
             <label class="checkbox">
-              <input type="checkbox" id="noLimit" />
-              No limit (may be slow)
+              Page size
+              <select id="pageSize">
+                <option value="50">50</option>
+                <option value="100" selected>100</option>
+                <option value="500">500</option>
+                <option value="1000">1000</option>
+              </select>
             </label>
+            <div class="pager">
+              <button id="prevBtn" type="button" disabled>Prev</button>
+              <span id="pageInfo" class="pageInfo">Page 1</span>
+              <button id="nextBtn" type="button" disabled>Next</button>
+            </div>
           </div>
           <div class="hint">
-            NOTE: By default the backend limits results to keep things responsive.
+            Use pagination to browse through large result sets
           </div>
         </section>
 

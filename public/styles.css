@@ -161,6 +161,25 @@ button:disabled {
   font-size: 13px;
 }
 
+select {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: rgba(0,0,0,0.22);
+  color: var(--text);
+}
+
+.pager {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.pageInfo {
+  color: var(--muted);
+  font-size: 13px;
+}
+
 .results {
   margin-top: 8px;
 }

@@ -4,11 +4,17 @@ const csvFile = document.getElementById('csvFile');
 const uploadBtn = document.getElementById('uploadBtn');
 const runBtn = document.getElementById('runBtn');
 const queryEl = document.getElementById('query');
-const noLimitEl = document.getElementById('noLimit');
+const pageSizeEl = document.getElementById('pageSize');
+const prevBtn = document.getElementById('prevBtn');
+const nextBtn = document.getElementById('nextBtn');
+const pageInfoEl = document.getElementById('pageInfo');
 const uploadMeta = document.getElementById('uploadMeta');
 const errorEl = document.getElementById('error');
 const resultsMetaEl = document.getElementById('resultsMeta');
 const tableWrap = document.getElementById('tableWrap');
+
+let currentQuery = '';
+let currentPage = 1;
 
 function setStatus(msg) {
   statusEl.textContent = msg || '';
@@ -38,10 +44,65 @@ function setResultsMeta(msg) {
 function setLoading(isLoading) {
   uploadBtn.disabled = isLoading;
   runBtn.disabled = isLoading;
+  if (prevBtn) prevBtn.disabled = isLoading || currentPage <= 1;
+  if (nextBtn) nextBtn.disabled = isLoading;
   if (isLoading) {
     document.body.style.cursor = 'progress';
   } else {
     document.body.style.cursor = 'default';
+  }
+}
+
+function setPagerState({ page, hasNext }) {
+  currentPage = page;
+  if (pageInfoEl) pageInfoEl.textContent = `Page ${page}`;
+  if (prevBtn) prevBtn.disabled = page <= 1;
+  if (nextBtn) nextBtn.disabled = !hasNext;
+}
+
+function getPageSize() {
+  const raw = pageSizeEl ? Number(pageSizeEl.value) : 100;
+  if (!Number.isFinite(raw) || raw <= 0) return 100;
+  return raw;
+}
+
+async function runQueryPage(page) {
+  showError(null);
+  tableWrap.innerHTML = '';
+  setResultsMeta(null);
+
+  if (!currentQuery.trim()) {
+    showError('Enter a SQL query.');
+    return;
+  }
+
+  setLoading(true);
+  setStatus('Running query...');
+
+  try {
+    const res = await fetch('/query', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query: currentQuery, page, pageSize: getPageSize() }),
+    });
+
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(text || 'Query failed');
+    }
+
+    const data = await res.json();
+    renderTable(data.columns, data.rows);
+    const rowCount = data.rows?.length ?? 0;
+    const colCount = data.columns?.length ?? 0;
+    setPagerState({ page: data.page ?? page, hasNext: !!data.hasNext });
+    setResultsMeta(`Columns: ${colCount} · Rows: ${rowCount} · Page size: ${data.pageSize ?? getPageSize()}`);
+    setStatus(`Query complete. Returned ${rowCount} row(s).`);
+  } catch (err) {
+    showError(String(err?.message ?? err));
+    setStatus('Query failed.');
+  } finally {
+    setLoading(false);
   }
 }
 
@@ -68,7 +129,11 @@ function escapeHtml(s) {
 function formatValue(v) {
   if (v === null || v === undefined) return '';
   if (typeof v === 'object') return JSON.stringify(v);
-  return String(v);
+  const s = String(v);
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(s)) {
+    return s.slice(0, 10);
+  }
+  return s;
 }
 
 async function health() {
@@ -86,6 +151,7 @@ uploadForm.addEventListener('submit', async (e) => {
   e.preventDefault();
   showError(null);
   setResultsMeta(null);
+  setPagerState({ page: 1, hasNext: false });
 
   if (!csvFile.files || csvFile.files.length === 0) {
     showError('Pick a CSV file first.');
@@ -126,44 +192,33 @@ uploadForm.addEventListener('submit', async (e) => {
 });
 
 runBtn.addEventListener('click', async () => {
-  showError(null);
-  tableWrap.innerHTML = '';
-  setResultsMeta(null);
-
-  const q = queryEl.value || '';
-  if (!q.trim()) {
-    showError('Enter a SQL query.');
-    return;
-  }
-
-  setLoading(true);
-  setStatus('Running query...');
-
-  try {
-    const res = await fetch('/query', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query: q, noLimit: !!noLimitEl.checked }),
-    });
-
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(text || 'Query failed');
-    }
-
-    const data = await res.json();
-    renderTable(data.columns, data.rows);
-    const rowCount = data.rows?.length ?? 0;
-    const colCount = data.columns?.length ?? 0;
-    const limitNote = noLimitEl.checked ? 'No limit applied.' : 'Showing up to 1000 rows.';
-    setResultsMeta(`Columns: ${colCount} · Rows: ${rowCount} · ${limitNote}`);
-    setStatus(`Query complete. Returned ${rowCount} row(s).`);
-  } catch (err) {
-    showError(String(err?.message ?? err));
-    setStatus('Query failed.');
-  } finally {
-    setLoading(false);
-  }
+  currentQuery = queryEl.value || '';
+  currentPage = 1;
+  await runQueryPage(currentPage);
 });
+
+if (prevBtn) {
+  prevBtn.addEventListener('click', async () => {
+    if (currentPage <= 1) return;
+    await runQueryPage(currentPage - 1);
+  });
+}
+
+if (nextBtn) {
+  nextBtn.addEventListener('click', async () => {
+    await runQueryPage(currentPage + 1);
+  });
+}
+
+if (pageSizeEl) {
+  pageSizeEl.addEventListener('change', async () => {
+    currentPage = 1;
+    if (currentQuery.trim()) {
+      await runQueryPage(currentPage);
+    } else {
+      setPagerState({ page: 1, hasNext: false });
+    }
+  });
+}
 
 health();
