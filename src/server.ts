@@ -34,10 +34,24 @@ const db = new DuckDB.Database("data.duckdb");
 
 function jsonSafeValue(value: any): any {
   if (typeof value === "bigint") return value.toString();
+  if (value instanceof Date) return value.toISOString();
   if (Array.isArray(value)) return value.map(jsonSafeValue);
   if (value && typeof value === "object") {
+    const ctorName = value?.constructor?.name;
+    if (ctorName && ctorName !== "Object" && ctorName !== "Array") {
+      const str = typeof value.toString === "function" ? value.toString() : "";
+      if (str && str !== "[object Object]") return str;
+    }
+
+    const entries = Object.entries(value);
+    if (entries.length === 0) {
+      const str = typeof value.toString === "function" ? value.toString() : "";
+      if (str && str !== "[object Object]") return str;
+      return null;
+    }
+
     const out: Record<string, any> = {};
-    for (const [k, v] of Object.entries(value)) out[k] = jsonSafeValue(v);
+    for (const [k, v] of entries) out[k] = jsonSafeValue(v);
     return out;
   }
   return value;
@@ -119,11 +133,11 @@ app.post("/query", async (req, res) => {
 
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   if (err?.code === "LIMIT_FILE_SIZE") {
-    return res.status(413).send("File too large (max 1GB)");
+    return res.status(413).type("text/plain").send("File too large (max 1GB)");
   }
   if (err) {
     console.error(err);
-    return res.status(500).send(err.message ?? "Internal error");
+    return res.status(500).type("text/plain").send(err.message ?? "Internal error");
   }
 });
 
