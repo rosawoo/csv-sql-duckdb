@@ -7,6 +7,7 @@ const queryEl = document.getElementById('query');
 const noLimitEl = document.getElementById('noLimit');
 const uploadMeta = document.getElementById('uploadMeta');
 const errorEl = document.getElementById('error');
+const resultsMetaEl = document.getElementById('resultsMeta');
 const tableWrap = document.getElementById('tableWrap');
 
 function setStatus(msg) {
@@ -21,6 +22,17 @@ function showError(msg) {
   }
   errorEl.hidden = false;
   errorEl.textContent = msg;
+}
+
+function setResultsMeta(msg) {
+  if (!resultsMetaEl) return;
+  if (!msg) {
+    resultsMetaEl.hidden = true;
+    resultsMetaEl.textContent = '';
+    return;
+  }
+  resultsMetaEl.hidden = false;
+  resultsMetaEl.textContent = msg;
 }
 
 function setLoading(isLoading) {
@@ -73,6 +85,7 @@ async function health() {
 uploadForm.addEventListener('submit', async (e) => {
   e.preventDefault();
   showError(null);
+  setResultsMeta(null);
 
   if (!csvFile.files || csvFile.files.length === 0) {
     showError('Pick a CSV file first.');
@@ -87,6 +100,7 @@ uploadForm.addEventListener('submit', async (e) => {
   setStatus('Uploading and importing CSV...');
   uploadMeta.textContent = '';
   tableWrap.innerHTML = '';
+  setResultsMeta(null);
 
   try {
     const res = await fetch('/upload', {
@@ -114,6 +128,7 @@ uploadForm.addEventListener('submit', async (e) => {
 runBtn.addEventListener('click', async () => {
   showError(null);
   tableWrap.innerHTML = '';
+  setResultsMeta(null);
 
   const q = queryEl.value || '';
   if (!q.trim()) {
@@ -138,7 +153,11 @@ runBtn.addEventListener('click', async () => {
 
     const data = await res.json();
     renderTable(data.columns, data.rows);
-    setStatus(`Query complete. Returned ${data.rows?.length ?? 0} row(s).`);
+    const rowCount = data.rows?.length ?? 0;
+    const colCount = data.columns?.length ?? 0;
+    const limitNote = noLimitEl.checked ? 'No limit applied.' : 'Showing up to 1000 rows.';
+    setResultsMeta(`Columns: ${colCount} · Rows: ${rowCount} · ${limitNote}`);
+    setStatus(`Query complete. Returned ${rowCount} row(s).`);
   } catch (err) {
     showError(String(err?.message ?? err));
     setStatus('Query failed.');

@@ -32,6 +32,17 @@ app.use(express.static(publicDir));
 
 const db = new DuckDB.Database("data.duckdb");
 
+function jsonSafeValue(value: any): any {
+  if (typeof value === "bigint") return value.toString();
+  if (Array.isArray(value)) return value.map(jsonSafeValue);
+  if (value && typeof value === "object") {
+    const out: Record<string, any> = {};
+    for (const [k, v] of Object.entries(value)) out[k] = jsonSafeValue(v);
+    return out;
+  }
+  return value;
+}
+
 function queryDuckDB(sql: string): Promise<{ columns: string[]; rows: any[][] }> {
   return new Promise((resolve, reject) => {
     db.all(sql, (err: Error | null, rows: any[]) => {
@@ -39,7 +50,7 @@ function queryDuckDB(sql: string): Promise<{ columns: string[]; rows: any[][] }>
       if (rows.length === 0) return resolve({ columns: [], rows: [] });
 
       const columns = Object.keys(rows[0]);
-      const rowArrays = rows.map((r) => columns.map((c) => r[c]));
+      const rowArrays = rows.map((r) => columns.map((c) => jsonSafeValue(r[c])));
       resolve({ columns, rows: rowArrays });
     });
   });
@@ -78,7 +89,7 @@ app.post("/upload", upload.single("file"), async (req, res) => {
     `);
 
     const count = await queryDuckDB("SELECT COUNT(*) AS cnt FROM tablename;");
-    const rowCount = count.rows[0][0];
+    const rowCount = jsonSafeValue(count.rows[0][0]);
 
     fs.unlink(csvPath, () => {});
 

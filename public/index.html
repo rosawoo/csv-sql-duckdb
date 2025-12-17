@@ -3,14 +3,14 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>CSV to SQL (DuckDB)</title>
+    <title>Query CSV with SQL — Upload & Explore</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
     <div class="page">
       <header class="header">
         <div>
-          <h1>CSV to SQL</h1>
+          <h1>Query CSV with SQL</h1>
           <p class="subtitle">Upload a CSV as <code>tablename</code>, then query it with SQL.</p>
         </div>
         <div class="status" id="status"></div>
@@ -58,6 +58,7 @@ ORDER BY salary DESC;</textarea>
         <section class="card card--full">
           <h2>3) Results</h2>
           <div class="results">
+            <div id="resultsMeta" class="resultsMeta" hidden></div>
             <div id="error" class="error" hidden></div>
             <div id="tableWrap" class="tableWrap"></div>
           </div>
@@ -66,7 +67,7 @@ ORDER BY salary DESC;</textarea>
 
       <footer class="footer">
         <!-- <span>Backend: Express + DuckDB</span> -->
-        <span class="dot">•</span>
+        <!-- <span class="dot">•</span> -->
         <a href="/health" target="_blank" rel="noreferrer">/health</a>
       </footer>
     </div>
